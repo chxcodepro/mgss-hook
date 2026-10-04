@@ -1,0 +1,11 @@
+[project]
+name = "android-wx-mgss"
+version = "0.1.0"
+description = "Runtime currency debugger for the WeChat Horror Dormitory mini-game"
+requires-python = ">=3.12"
+dependencies = [
+  "frida==17.9.11",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,165 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Build and lint APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Install SDK packages
+        run: sdkmanager 'platforms;android-34' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Read version and validate release tag
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n "s/^[[:space:]]*versionName '\([^']*\)'/\1/p" app/build.gradle)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid versionName'; exit 1; }
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$REF_TYPE" == tag ]]; then
+            [[ "$REF_NAME" == "v$version" ]] || { echo 'Tag must match versionName'; exit 1; }
+          fi
+
+      - name: Restore release signing key
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Missing ANDROID_KEYSTORE_BASE64}"
+          : "${STORE_PASSWORD:?Missing ANDROID_STORE_PASSWORD}"
+          : "${KEY_ALIAS:?Missing ANDROID_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD}"
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mgss-release.jks"
+
+      - name: Build debug APK and run lint
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: ./gradlew --no-daemon :app:assembleDebug :app:lintDebug
+
+      - name: Build signed release APK and run lint
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          MGSS_KEYSTORE_PATH: ${{ runner.temp }}/mgss-release.jks
+          MGSS_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          MGSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MGSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleRelease :app:lintRelease
+
+      - name: Package APK and checksum
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          if [[ "$REF_TYPE" == tag ]]; then
+            cp app/build/outputs/apk/release/app-release.apk "../dist/mgss-lock-$VERSION.apk"
+            awk -v version="$VERSION" '
+              /^## / {
+                if (found) exit
+                if (index($0, "## " version " - ") == 1) { found = 1; next }
+              }
+              found { print }
+              END { if (!found) exit 1 }
+            ' ../CHANGELOG.md > ../dist/RELEASE_NOTES.md
+            [[ -s ../dist/RELEASE_NOTES.md ]] || { echo 'Release notes are empty'; exit 1; }
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk "../dist/mgss-lock-$VERSION-debug.apk"
+          fi
+          cd ../dist
+          sha256sum *.apk > SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mgss-lock-${{ steps.version.outputs.name }}-${{ github.run_id }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lint-reports-${{ github.run_id }}
+          path: android/app/build/reports/lint-results-*
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/mgss-release.jks"
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download APK and checksum
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mgss-lock-*-${{ github.run_id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum --check SHA256SUMS.txt
+          if ! gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          fi
+          gh release upload "$RELEASE_TAG" ./*.apk SHA256SUMS.txt --clobber

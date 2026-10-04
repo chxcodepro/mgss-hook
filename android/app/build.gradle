@@ -1,0 +1,45 @@
+plugins { id 'com.android.application' }
+
+def releaseSigning = [
+    storeFile: System.getenv('MGSS_KEYSTORE_PATH'),
+    storePassword: System.getenv('MGSS_STORE_PASSWORD'),
+    keyAlias: System.getenv('MGSS_KEY_ALIAS'),
+    keyPassword: System.getenv('MGSS_KEY_PASSWORD')
+]
+def hasReleaseSigning = releaseSigning.values().every { it }
+if (releaseSigning.values().any { it } && !hasReleaseSigning) {
+    throw new GradleException('Release signing requires all four MGSS signing environment variables.')
+}
+
+android {
+    namespace 'io.github.mgss.lock'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'io.github.mgss.lock'
+        minSdk 30
+        targetSdk 34
+        versionCode 3
+        versionName '1.0.2'
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+dependencies { compileOnly files('libs/xposed-api-82.jar') }
