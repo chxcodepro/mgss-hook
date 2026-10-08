@@ -8,6 +8,13 @@ public final class BundlePatcherTest {
         String source = BundlePatcher.readWxa(args[0], "/js/game.js");
         String controller = new String(Files.readAllBytes(Paths.get(args[1])), java.nio.charset.StandardCharsets.UTF_8);
         String patched = BundlePatcher.patch(source, controller);
+        if (!BundlePatcher.ghostCompatible(source)) throw new AssertionError("Current ghost signatures missing");
+        String extension = "/* ghost test extension */";
+        String withGhost = BundlePatcher.patch(source, controller, extension);
+        if (!withGhost.contains(extension)) throw new AssertionError("Ghost extension missing");
+        String future = source.replace("this.hli=1,this.rqo=1,this.laj=!1,this.yok();", "this.hli=2,this.rqo=1,this.laj=!1,this.yok();");
+        String fallback = BundlePatcher.patch(future, controller, extension);
+        if (fallback.contains(extension) || !fallback.contains(controller)) throw new AssertionError("Ghost mismatch must preserve existing controls");
         if (patched == null || !patched.contains(controller)) throw new AssertionError("Controller missing");
         if (!patched.replace(controller + "\n", "").equals(source)) throw new AssertionError("Original bundle changed");
         if (BundlePatcher.patch("another game", controller) != null) throw new AssertionError("Other game patched");

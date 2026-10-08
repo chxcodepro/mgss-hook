@@ -32,7 +32,7 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
     private volatile WeakReference<Object> runtime = new WeakReference<>(null);
     private volatile String error = "";
     private volatile boolean target;
-    private String controller;
+    private String controller, ghost;
     private long requested;
     private volatile boolean pending;
     @Override public void initZygote(StartupParam param) { modulePath = param.modulePath; }
@@ -45,7 +45,7 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
                 HandlerThread thread = new HandlerThread("MgssControls"); thread.start();
                 worker = new Handler(thread.getLooper());
                 try {
-                    controller = loadController();
+                    controller = loadAsset("controller.js"); ghost = loadAsset("ghost.js");
                     Class<?> cls = XposedHelpers.findClass("com.tencent.mm.plugin.appbrand.jsruntime.h", context.getClassLoader());
                     java.util.Set<XC_MethodHook.Unhook> hooks = XposedBridge.hookAllMethods(cls, "k0", new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam call) { patchRequests(call); }
@@ -69,11 +69,11 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
             }
         });
     }
-    private String loadController() throws Exception {
+    private String loadAsset(String name) throws Exception {
         AssetManager assets = AssetManager.class.getDeclaredConstructor().newInstance();
         Method add = AssetManager.class.getDeclaredMethod("addAssetPath", String.class); add.setAccessible(true);
         add.invoke(assets, modulePath);
-        try (InputStream input = assets.open("controller.js"); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        try (InputStream input = assets.open(name); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] bytes = new byte[4096]; int size;
             while ((size = input.read(bytes)) != -1) output.write(bytes, 0, size);
             return new String(output.toByteArray(), StandardCharsets.UTF_8);
@@ -94,7 +94,7 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
                     source = (String) XposedHelpers.getObjectField(request, "scriptText");
                 }
                 if (source == null) continue;
-                String patched = BundlePatcher.patch(source, controller);
+                String patched = BundlePatcher.patch(source, controller, ghost);
                 if (patched == null) continue;
                 XposedHelpers.setIntField(request, "scriptType", XposedHelpers.getStaticIntField(request.getClass(), "SCRIPT_TYPE_TEXT"));
                 XposedHelpers.setObjectField(request, "scriptText", patched);
@@ -123,7 +123,15 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
             Bundle b;
             try { b = State.read(context); } catch (Throwable unavailable) { b = new Bundle(); }
             config.put("running", b.getBoolean("running"));
-            for (String key : State.KEYS) config.put(key, b.getBoolean(key));
+            for (String key : State.FLAGS) config.put(key, b.getBoolean(key));
+            Bundle pendingCommand = b.getBundle("ghostCommand");
+            if (pendingCommand != null) {
+                JSONObject command = new JSONObject();
+                command.put("id", pendingCommand.getString("id")); command.put("token", pendingCommand.getString("token"));
+                command.put("kind", pendingCommand.getString("kind")); command.put("value", pendingCommand.getInt("value"));
+                command.put("expiresAt", pendingCommand.getLong("expiresAt"));
+                config.put("ghostCommand", command);
+            }
             config.put("target", 999999); config.put("revision", b.getInt("revision"));
             String script = "JSON.stringify((function(){var r=typeof GameGlobal!=='undefined'?GameGlobal:globalThis;"
                 + "return r.__mgssControl?r.__mgssControl.apply(" + config + "):{ready:false};})())";
@@ -146,6 +154,14 @@ public final class GameModule implements IXposedHookLoadPackage, IXposedHookZygo
                 b.putBoolean("ready", snapshot.optBoolean("ready"));
                 b.putInt("appliedRevision", snapshot.optInt("revision", -1));
                 b.putBoolean("adInstalled", snapshot.optBoolean("adInstalled"));
+                b.putBoolean("ghostAvailable", snapshot.optBoolean("ghostAvailable"));
+                b.putBoolean("ghostSelf", snapshot.optBoolean("ghostSelf"));
+                b.putBoolean("selfGhostHpApplied", snapshot.optBoolean("selfGhostHpApplied"));
+                b.putInt("ghostLevel", snapshot.optInt("ghostLevel")); b.putInt("ghostMaxLevel", snapshot.optInt("ghostMaxLevel"));
+                b.putDouble("ghostHp", snapshot.optDouble("ghostHp", -1)); b.putDouble("ghostMaxHp", snapshot.optDouble("ghostMaxHp", -1));
+                b.putString("ghostToken", snapshot.optString("ghostToken"));
+                b.putString("ghostRequestId", snapshot.optString("ghostRequestId"));
+                b.putString("ghostCommandError", snapshot.optString("ghostCommandError"));
                 for (String key : State.KEYS) {
                     b.putLong(key + "Value", snapshot.optLong(key + "Value", -1));
                     b.putBoolean(key + "Applied", snapshot.optBoolean(key + "Applied"));

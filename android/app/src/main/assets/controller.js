@@ -191,12 +191,13 @@
             if (honeyChanged) data.instance.player.gold = state.target;
             ads.install();
             if (slots) slots.route(skipping());
+            if (root.__mgssGhost) root.__mgssGhost.apply(next);
             return this.snapshot();
         },
         snapshot: function () {
             var player = players.instance.player;
             var value = player && data.instance.fli.prp[player.rqp];
-            return { ready: true, goldValue: value ? value.gold1 : -1,
+            var result = { ready: true, goldValue: value ? value.gold1 : -1,
                 lightningValue: value ? value.gold2 : -1, honeyValue: data.instance.player.gold,
                 adValue: ads.stats.skipped, adSlots: ads.stats.created,
                 revision: state.revision, running: state.running,
@@ -204,6 +205,9 @@
                 honeyApplied: state.running && state.honey,
                 adApplied: skipping() && ads.stats.installed, adInstalled: ads.stats.installed,
                 adRouted: slots ? slots.routed() : false };
+            var ghost = root.__mgssGhost ? root.__mgssGhost.snapshot() : { ghostAvailable: false, ghostSelf: false, selfGhostHpApplied: false };
+            for (var key in ghost) result[key] = ghost[key];
+            return result;
         }
     };
 })(Ns, Ds, E, O, typeof GameGlobal !== 'undefined' ? GameGlobal : globalThis);

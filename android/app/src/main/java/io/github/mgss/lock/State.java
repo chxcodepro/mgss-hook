@@ -10,6 +10,7 @@ final class State {
     static final Uri URI = Uri.parse("content://io.github.mgss.lock.bridge");
     static final Uri CONFIG = Uri.withAppendedPath(URI, "config");
     static final String[] KEYS = {"gold", "lightning", "honey", "ad"};
+    static final String[] FLAGS = {"gold", "lightning", "honey", "ad", "selfGhostHp"};
     static Bundle read(Context context) {
         Bundle value = context.getContentResolver().call(URI, "read", null, null);
         return value == null ? new Bundle() : value;
@@ -20,6 +21,15 @@ final class State {
     }
     static boolean connected(Bundle b) {
         return b.getLong("seen") > 0 && SystemClock.elapsedRealtime() - b.getLong("seen") < 5000;
+    }
+    static void level(Context context, String kind, int value) {
+        level(context, kind, value, read(context).getString("ghostToken", ""));
+    }
+    static void level(Context context, String kind, int value, String token) {
+        Bundle command = new Bundle();
+        command.putString("kind", kind); command.putInt("value", value);
+        command.putString("token", token);
+        context.getContentResolver().call(URI, "ghostCommand", null, command);
     }
     static String status(Bundle b) {
         if (connected(b)) {

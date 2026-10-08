@@ -14,10 +14,27 @@ final class BundlePatcher {
         "{key:\"wtn\",value:function wtn(t){if(this._data._gold+=t,"
     };
     static String patch(String source, String controller) {
+        return patch(source, controller, "");
+    }
+    static String patch(String source, String controller, String ghost) {
         if (!source.contains("HorrorDormitory")) return null;
         for (String signature : SIGNATURES) if (count(source, signature) != 1) throw new IllegalArgumentException("Currency signature mismatch");
         if (count(source, TAIL) != 1) throw new IllegalArgumentException("Bundle scope mismatch");
-        return source.replace(TAIL, controller + "\n" + TAIL);
+        String extension = !ghost.isEmpty() && ghostCompatible(source) ? ghost + "\n" : "";
+        return source.replace(TAIL, extension + controller + "\n" + TAIL);
+    }
+    static boolean ghostCompatible(String source) {
+        String start = "var yi=/*#__PURE__*/function(_Pt)", end = "return yi;}";
+        int from = source.indexOf(start), to = source.indexOf(end, from);
+        if (from < 0 || to < from || count(source, start) != 1) return false;
+        String actor = source.substring(from, to);
+        return count(actor, "{key:\"ljq\",get:function get(){return this.uje;},set:function set(t){t=this.ava(t),this.uje=t,this.ljq>this.hfv&&(this.uje=this.hfv),this.nci=this.hp;}}") == 1
+            && count(actor, "{key:\"xxl\",value:function xxl(){this.hli=1,this.rqo=1,this.laj=!1,this.yok();}}") == 1
+            && count(actor, "{key:\"yok\",value:function yok(){this.level++,this.dta=this.fxq[this.cuj];") == 1
+            && count(actor, "{key:\"hfv\",get:function get(){if(T.mode==B.Troll)return this.mke+this.yir();") == 1
+            && count(source, "{key:\"player\",get:function get(){return T.mode==B.Troll?_.instance.xax:null==this.fjf?null==O.instance.angel?O.instance.player:O.instance.angel:null;}}") == 1
+            && count(source, "var ms=/*#__PURE__*/function(_yi)") == 1
+            && count(source, "{key:\"xax\",get:function get(){return this.tmi;}}") == 1;
     }
     private static int count(String source, String needle) {
         int count = 0, offset = 0;
