@@ -40,6 +40,8 @@
 
 新版控制器与原币值、广告及版本保护测试通过，用户已完成 1.1.1 实机验收。1.1.1 修复白色原生弹窗上的等级输入文字，改为黑色。
 
+1.1.2 增加小游戏 WXA 包版本 116 的适配，覆盖新脚本结构及资源、广告、猎梦者字段映射，同时保留原脚本支持。已核对设备包源码并静态审查改动；本轮未执行行为测试，实机功能待验收。
+
 ## 运行要求
 
 - Android 11（API 30）或更高版本。
@@ -159,7 +161,7 @@ git push origin v1.0.3
 
 ## 测试
 
-行为测试需要自行准备当前小游戏的 WXA 包，游戏包和解包源码不包含在仓库中。以下命令在项目根目录执行，需要 Python 3.12+、Node.js 和 JDK：
+行为测试需要自行准备对应版本的 WXA 包，游戏包和解包源码不包含在仓库中。以下旧脚本行为检查在项目根目录执行，需要 Python 3.12+、Node.js 和 JDK：
 
 ```bash
 python tools/extract_wxa.py path/to/package.wxapkg artifacts/source/game.js
@@ -171,6 +173,15 @@ java -cp artifacts/test-classes io.github.mgss.lock.BundlePatcherTest path/to/pa
 ```
 
 `test_ad_skip.mjs` 会检查广告链路锚点（`xjw`、`Hs.gwa`、`U.gwa`）；特征变化时测试直接失败。公开 CI 运行 APK 构建与 Android lint，以上依赖游戏样本的行为测试在本地执行。
+
+包版本 116 的补丁绑定与失败保护检查：
+
+```bash
+javac -d artifacts/test-classes android/app/src/main/java/io/github/mgss/lock/BundlePatcher.java tests/BundlePatcherCurrentTest.java
+java -cp artifacts/test-classes io.github.mgss.lock.BundlePatcherCurrentTest path/to/package-116.wxapkg android/app/src/main/assets/controller.js android/app/src/main/assets/ghost.js
+```
+
+该检查覆盖注入字段、原脚本保留、特征拒绝和猎梦者独立降级。资源消费、广告奖励与猎梦者操控的实机验收另行记录。
 
 电脑端 Frida 调试、资源扫描和运行时命令详见 [电脑诊断工具](docs/diagnostics.md)。
 
